@@ -1,7 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() {
   // DOM Elements
+  const menuBtn = document.getElementById('menu-btn');
+  const menuDropdown = document.getElementById('menu-dropdown');
   const uploadBtn = document.getElementById('upload-btn');
-  const streamBtn = document.getElementById('stream-btn');
+  const screenShareBtn = document.getElementById('screen-share-btn');
+  const cameraShareBtn = document.getElementById('camera-share-btn');
   const stopBtn = document.getElementById('stop-btn');
   const videoPlayer = document.getElementById('video-player');
   const videoPlaceholder = document.getElementById('video-placeholder');
@@ -23,7 +26,8 @@ document.addEventListener('DOMContentLoaded', function() {
   const themeToggleBtn = document.getElementById('theme-toggle');
 
   // State
-  let isStreaming = false;
+  let isScreenSharing = false;
+  let isCameraSharing = false;
   let isPlaying = false;
   let chatInterval;
   let chatRate = 5; // Default rate (messages per minute)
@@ -38,6 +42,7 @@ document.addEventListener('DOMContentLoaded', function() {
   let analysisInterval = 10000; // Analyze video every 10 seconds
   let videoAnalysisInterval;
   let isDarkMode = localStorage.getItem('darkMode') === 'true';
+  let isMenuOpen = false;
 
   // Gemini API configuration
   const GEMINI_API_KEY = 'AIzaSyDzEOzLmoojB88PUwpXfGN4_IE1hFJqTDQ';
@@ -143,14 +148,45 @@ document.addEventListener('DOMContentLoaded', function() {
   ];
 
   // Event listeners
+  menuBtn.addEventListener('click', toggleMenu);
   uploadBtn.addEventListener('click', openUploadModal);
-  streamBtn.addEventListener('click', toggleStreaming);
+  screenShareBtn.addEventListener('click', startScreenShare);
+  cameraShareBtn.addEventListener('click', startCameraShare);
   stopBtn.addEventListener('click', stopSession);
   closeModal.addEventListener('click', closeUploadModal);
   uploadForm.addEventListener('submit', handleVideoUpload);
   chatRateSlider.addEventListener('input', updateChatRate);
   popoutChatBtn.addEventListener('click', togglePopoutChat);
   themeToggleBtn.addEventListener('click', toggleDarkMode);
+  
+  // Close menu when clicking outside
+  document.addEventListener('click', function(e) {
+    if (!menuBtn.contains(e.target) && !menuDropdown.contains(e.target)) {
+      closeMenu();
+    }
+  });
+
+  // Menu functions
+  function toggleMenu() {
+    isMenuOpen = !isMenuOpen;
+    if (isMenuOpen) {
+      openMenu();
+    } else {
+      closeMenu();
+    }
+  }
+  
+  function openMenu() {
+    isMenuOpen = true;
+    menuDropdown.classList.remove('hidden');
+    menuBtn.setAttribute('aria-expanded', 'true');
+  }
+  
+  function closeMenu() {
+    isMenuOpen = false;
+    menuDropdown.classList.add('hidden');
+    menuBtn.setAttribute('aria-expanded', 'false');
+  }
 
   // Add new functions for theme toggling
   function toggleDarkMode() {
@@ -226,14 +262,17 @@ document.addEventListener('DOMContentLoaded', function() {
     videoPlayer.play();
     
     isPlaying = true;
-    isStreaming = false;
+    isScreenSharing = false;
+    isCameraSharing = false;
     stopBtn.disabled = false;
     stopBtn.textContent = 'Stop Session';
-    streamBtn.textContent = 'Start Streaming';
     
     // Show view count, hide stream indicator
     viewCount.style.display = 'flex';
     streamIndicator.classList.add('hidden');
+    
+    // Close menu after action
+    closeMenu();
     
     // Start generating chat
     startChat();
@@ -243,20 +282,12 @@ document.addEventListener('DOMContentLoaded', function() {
     setupVideoAnalysis();
   }
 
-  function toggleStreaming() {
-    if (isStreaming) {
-      stopStreaming();
-    } else {
-      startStreaming();
-    }
-  }
-
-  function startStreaming() {
+  function startScreenShare() {
     if (isPlaying) {
       stopSession();
     }
     
-    // Request screen capture instead of camera access
+    // Request screen capture
     navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
       .then(function(stream) {
         videoPlayer.srcObject = stream;
@@ -267,14 +298,63 @@ document.addEventListener('DOMContentLoaded', function() {
         videoPlayer.play();
         
         isPlaying = true;
-        isStreaming = true;
+        isScreenSharing = true;
+        isCameraSharing = false;
         stopBtn.disabled = false;
-        stopBtn.textContent = 'Stop Streaming';
-        streamBtn.textContent = 'Stop Streaming';
+        stopBtn.textContent = 'Stop Sharing';
         
         // Hide view count, show stream indicator
         viewCount.style.display = 'none';
         streamIndicator.classList.remove('hidden');
+        
+        // Close menu after action
+        closeMenu();
+        
+        // Start generating chat
+        startChat();
+        startViewerCount();
+        
+        // Set up video analysis
+        setupVideoAnalysis();
+        
+        // Handle stream end (when user stops sharing)
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+          stopSession();
+        });
+      })
+      .catch(function(err) {
+        console.error('Error accessing screen:', err);
+        alert('Could not access screen. Please check your permissions and try again.');
+      });
+  }
+
+  function startCameraShare() {
+    if (isPlaying) {
+      stopSession();
+    }
+    
+    // Request camera access
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(function(stream) {
+        videoPlayer.srcObject = stream;
+        videoPlayer.style.display = 'block';
+        videoPlaceholder.style.display = 'none';
+        
+        videoTitle.textContent = 'Camera Feed';
+        videoPlayer.play();
+        
+        isPlaying = true;
+        isScreenSharing = false;
+        isCameraSharing = true;
+        stopBtn.disabled = false;
+        stopBtn.textContent = 'Stop Camera';
+        
+        // Hide view count, show stream indicator
+        viewCount.style.display = 'none';
+        streamIndicator.classList.remove('hidden');
+        
+        // Close menu after action
+        closeMenu();
         
         // Start generating chat
         startChat();
@@ -284,54 +364,38 @@ document.addEventListener('DOMContentLoaded', function() {
         setupVideoAnalysis();
       })
       .catch(function(err) {
-        console.error('Error accessing screen:', err);
-        alert('Could not access screen. Please check your permissions and try again.');
+        console.error('Error accessing camera:', err);
+        alert('Could not access camera. Please check your permissions and try again.');
       });
   }
 
-  function stopStreaming() {
+  function stopSession() {
+    // Stop any active streams
     if (videoPlayer.srcObject) {
       const tracks = videoPlayer.srcObject.getTracks();
       tracks.forEach(track => track.stop());
+      videoPlayer.srcObject = null;
     }
     
-    videoPlayer.srcObject = null;
+    // Stop video file playback
+    if (videoPlayer.src && !videoPlayer.srcObject) {
+      videoPlayer.pause();
+      videoPlayer.src = '';
+    }
+    
+    // Reset UI
     videoPlayer.style.display = 'none';
     videoPlaceholder.style.display = 'flex';
-    
     videoTitle.textContent = 'No video playing';
     
     isPlaying = false;
-    isStreaming = false;
+    isScreenSharing = false;
+    isCameraSharing = false;
     stopBtn.disabled = true;
-    streamBtn.textContent = 'Start Streaming';
     
-    // Reset UI
+    // Reset UI elements
     viewCount.style.display = 'flex';
     streamIndicator.classList.add('hidden');
-    
-    // Stop chat and viewer count
-    stopChat();
-    stopViewerCount();
-  }
-
-  function stopSession() {
-    if (isStreaming) {
-      stopStreaming();
-      return;
-    }
-    
-    videoPlayer.pause();
-    videoPlayer.src = '';
-    videoPlayer.style.display = 'none';
-    videoPlaceholder.style.display = 'flex';
-    
-    videoTitle.textContent = 'No video playing';
-    
-    isPlaying = false;
-    stopBtn.disabled = true;
-    
-    // Reset UI
     viewCount.querySelector('span').textContent = '0 viewers';
     coinCount.querySelector('span').textContent = '0 BabaCoins';
     
