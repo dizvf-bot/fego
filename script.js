@@ -667,6 +667,50 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
+  // Response templates based on what the AI identifies
+  const responseTemplates = {
+    // Objects and items
+    computer: ["Nice setup!", "That computer looks powerful!", "Sweet tech setup there!", "Love that setup!"],
+    phone: ["Is that the new phone?", "Nice phone!", "That phone camera quality looks great!"],
+    game: ["What game is that?", "This game looks fun!", "I love this game!", "Never played this one before!"],
+    code: ["Nice code!", "That's some clean coding!", "Programming stream! Love it!", "What language is that?"],
+    browser: ["Which browser do you prefer?", "Browser looks clean!", "Nice browser setup!"],
+    music: ["Great music choice!", "This song is fire!", "Love this track!", "What's this song?"],
+    
+    // Actions
+    typing: ["Fast typing!", "Those fingers are flying!", "Speed typing master!", "Impressive typing speed!"],
+    clicking: ["Nice clicks!", "Smooth navigation!", "Quick with the mouse!", "Good mouse control!"],
+    scrolling: ["Scrolling through like a pro!", "Fast scrolling!", "Smooth scrolling there!"],
+    streaming: ["Stream quality is great!", "This stream is smooth!", "Great stream setup!", "Professional streaming!"],
+    gaming: ["Nice gameplay!", "Good moves!", "That was smooth!", "Great gaming skills!"],
+    coding: ["Clean code!", "Nice programming!", "That logic looks solid!", "Good coding style!"],
+    
+    // Screen/Interface elements
+    screen: ["Screen looks crisp!", "Nice display quality!", "Clear screen!", "Good resolution!"],
+    window: ["Clean window layout!", "Nice window management!", "Organized desktop!", "Tidy workspace!"],
+    menu: ["Nice menu navigation!", "Smooth menu usage!", "Good interface!", "Clean UI!"],
+    chat: ["Chat is active!", "Love the interaction!", "Great community!", "Active chat today!"],
+    
+    // Colors (simplified responses)
+    blue: ["Love the blue theme!", "Blue looks clean!", "Nice blue colors!", "Blue is my favorite!"],
+    red: ["That red pops!", "Red looks great!", "Nice red accent!", "Bold red choice!"],
+    green: ["Green looks fresh!", "Love the green!", "Nice green theme!", "Green is calming!"],
+    purple: ["Purple looks royal!", "Love that purple!", "Nice purple theme!", "Purple is cool!"],
+    
+    // Moods/Atmosphere
+    professional: ["Very professional!", "Clean and professional!", "Business vibes!", "Professional setup!"],
+    casual: ["Chill vibes!", "Relaxed atmosphere!", "Casual and cool!", "Nice and easy!"],
+    technical: ["Tech vibes!", "Getting technical!", "Nerdy and I love it!", "Tech stuff is cool!"],
+    creative: ["Creative energy!", "Artistic vibes!", "Love the creativity!", "So creative!"],
+    
+    // Fallback responses for unknown items
+    default: [
+      "Interesting!", "Cool stuff!", "Nice!", "That's neat!", "Looking good!",
+      "I see that!", "Neat setup!", "Nice work!", "That's cool!", "Interesting choice!",
+      "Good stuff!", "That looks good!", "Nice touch!", "Cool feature!", "That's handy!"
+    ]
+  };
+
   async function analyzeImageWithGemini(imageDataUrl) {
     try {
       // Convert data URL to base64 (remove data:image/jpeg;base64, prefix)
@@ -676,17 +720,14 @@ document.addEventListener('DOMContentLoaded', function() {
         contents: [{
           parts: [
             {
-              text: `Analyze this image from a video/stream and identify key objects, actions, or noteworthy elements. 
-              Respond with JSON only, following this exact format:
-              {
-                "identified": ["object1", "object2"],
-                "primarySubject": "main subject description",
-                "action": "action occurring",
-                "background": "background description", 
-                "interesting": "most interesting element",
-                "mood": "overall mood",
-                "colors": ["color1", "color2"]
-              }`
+              text: `Look at this image and identify what you see. Respond with ONLY simple keywords separated by commas. 
+              Focus on: main objects (computer, phone, game, code, browser, music), 
+              actions (typing, clicking, scrolling, streaming, gaming, coding), 
+              interface elements (screen, window, menu, chat),
+              and dominant colors (blue, red, green, purple).
+              
+              Example response: computer, typing, blue, screen
+              Keep it simple - just the main things you notice.`
             },
             {
               inline_data: {
@@ -712,16 +753,12 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       
       const data = await response.json();
-      const text = data.candidates[0].content.parts[0].text;
+      const text = data.candidates[0].content.parts[0].text.trim();
       
-      // Extract JSON from response text
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      } else {
-        console.error('No JSON found in Gemini response:', text);
-        return null;
-      }
+      // Parse the simple keyword response
+      const keywords = text.toLowerCase().split(',').map(k => k.trim()).filter(k => k.length > 0);
+      
+      return { keywords };
     } catch (error) {
       console.error('Error in Gemini AI analysis:', error);
       return null;
@@ -729,52 +766,35 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   function generateAIResponseMessages(analysisResult) {
-    if (!analysisResult) return;
+    if (!analysisResult || !analysisResult.keywords || analysisResult.keywords.length === 0) return;
     
-    // Create messages based on analysis
+    // Pick 1-3 random keywords from the analysis
+    const selectedKeywords = [];
+    const numKeywords = Math.min(analysisResult.keywords.length, Math.floor(Math.random() * 3) + 1);
+    
+    for (let i = 0; i < numKeywords; i++) {
+      const availableKeywords = analysisResult.keywords.filter(k => !selectedKeywords.includes(k));
+      if (availableKeywords.length === 0) break;
+      
+      const randomKeyword = availableKeywords[Math.floor(Math.random() * availableKeywords.length)];
+      selectedKeywords.push(randomKeyword);
+    }
+    
+    // Generate messages based on selected keywords
     const messages = [];
     
-    // Primary subject comment
-    if (analysisResult.primarySubject) {
-      messages.push(`I see ${analysisResult.primarySubject} on screen now!`);
-    }
+    selectedKeywords.forEach(keyword => {
+      const templates = responseTemplates[keyword] || responseTemplates.default;
+      const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
+      messages.push(randomTemplate);
+    });
     
-    // Action comment
-    if (analysisResult.action) {
-      messages.push(`Whoa, look at ${analysisResult.action} happening!`);
-    }
-    
-    // Interesting element comment
-    if (analysisResult.interesting) {
-      messages.push(`That ${analysisResult.interesting} is really eye-catching!`);
-    }
-    
-    // Background comment
-    if (analysisResult.background) {
-      messages.push(`I like how the scene has ${analysisResult.background} in the background.`);
-    }
-    
-    // Mood comment
-    if (analysisResult.mood) {
-      messages.push(`The ${analysisResult.mood} mood of this scene is perfect.`);
-    }
-    
-    // Identified objects comments
-    if (analysisResult.identified && analysisResult.identified.length > 0) {
-      const randomObject = analysisResult.identified[Math.floor(Math.random() * analysisResult.identified.length)];
-      messages.push(`Did anyone else notice the ${randomObject}?`);
-    }
-    
-    // Send 1-3 messages from the analysis with slight delays
-    const numMessages = Math.min(messages.length, Math.floor(Math.random() * 3) + 1);
-    for (let i = 0; i < numMessages; i++) {
-      const index = Math.floor(Math.random() * messages.length);
-      const message = messages.splice(index, 1)[0];
-      
+    // Send messages with staggered timing
+    messages.forEach((message, index) => {
       setTimeout(() => {
         sendAnalysisMessage(message);
-      }, i * 1500); // Stagger messages by 1.5 seconds
-    }
+      }, index * 2000); // Stagger by 2 seconds
+    });
   }
   
   function sendAnalysisMessage(messageContent) {
