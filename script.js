@@ -37,13 +37,11 @@ document.addEventListener('DOMContentLoaded', function() {
   let lastAnalysisTime = 0;
   let analysisInterval = 10000; // Analyze video every 10 seconds
   let videoAnalysisInterval;
-  let audioContext;
-  let audioAnalyser;
-  let audioSource;
-  let audioDataArray;
-  let lastAudioAnalysisTime = 0;
-  let audioAnalysisInterval;
   let isDarkMode = localStorage.getItem('darkMode') === 'true';
+
+  // Gemini API configuration
+  const GEMINI_API_KEY = 'AIzaSyDzEOzLmoojB88PUwpXfGN4_IE1hFJqTDQ';
+  const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
   // Apply dark mode on load if it's saved in localStorage
   if (isDarkMode) {
@@ -243,9 +241,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up video analysis
     setupVideoAnalysis();
-    
-    // Set up audio analysis
-    setupAudioAnalysis(videoPlayer);
   }
 
   function toggleStreaming() {
@@ -287,9 +282,6 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Set up video analysis
         setupVideoAnalysis();
-        
-        // Set up audio analysis
-        setupAudioAnalysis(videoPlayer);
       })
       .catch(function(err) {
         console.error('Error accessing screen:', err);
@@ -321,9 +313,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Stop chat and viewer count
     stopChat();
     stopViewerCount();
-    
-    // Stop audio analysis
-    stopAudioAnalysis();
   }
 
   function stopSession() {
@@ -355,9 +344,6 @@ document.addEventListener('DOMContentLoaded', function() {
       clearInterval(videoAnalysisInterval);
       videoAnalysisInterval = null;
     }
-    
-    // Stop audio analysis
-    stopAudioAnalysis();
   }
 
   function startChat() {
@@ -632,7 +618,7 @@ document.addEventListener('DOMContentLoaded', function() {
     coinCount.querySelector('span').textContent = `${totalCoins} BabaCoins`;
   }
 
-  // Add new functions for video analysis
+  // Video analysis functions (updated to use Gemini API)
   function setupVideoAnalysis() {
     // Setup canvas dimensions once video metadata is loaded
     videoPlayer.addEventListener('loadedmetadata', function() {
@@ -669,8 +655,8 @@ document.addEventListener('DOMContentLoaded', function() {
       // Convert canvas to data URL
       const imageDataUrl = videoFrameCanvas.toDataURL('image/jpeg', 0.7);
       
-      // Send to AI for analysis
-      const result = await analyzeImageWithAI(imageDataUrl);
+      // Send to Gemini AI for analysis
+      const result = await analyzeImageWithGemini(imageDataUrl);
       
       // Generate chat messages based on AI analysis
       if (result) {
@@ -681,40 +667,63 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
-  async function analyzeImageWithAI(imageDataUrl) {
+  async function analyzeImageWithGemini(imageDataUrl) {
     try {
-      const completion = await websim.chat.completions.create({
-        messages: [
-          {
-            role: "user",
-            content: [
+      // Convert data URL to base64 (remove data:image/jpeg;base64, prefix)
+      const base64Image = imageDataUrl.split(',')[1];
+      
+      const requestBody = {
+        contents: [{
+          parts: [
+            {
+              text: `Analyze this image from a video/stream and identify key objects, actions, or noteworthy elements. 
+              Respond with JSON only, following this exact format:
               {
-                type: "text",
-                text: `Analyze this image from a video/stream and identify key objects, actions, or noteworthy elements. 
-                Respond directly with JSON, following this JSON schema, and no other text.
-                {
-                  identified: string[], // Array of key objects/elements identified
-                  primarySubject: string, // The main subject of the frame
-                  action: string, // What action is occurring, if any
-                  background: string, // Brief description of the background
-                  interesting: string, // Most interesting or noteworthy element
-                  mood: string, // Overall mood or tone of the image
-                  colors: string[] // Dominant colors in the frame
-                }`,
-              },
-              {
-                type: "image_url",
-                image_url: { url: imageDataUrl },
-              },
-            ],
-          },
-        ],
-        json: true,
+                "identified": ["object1", "object2"],
+                "primarySubject": "main subject description",
+                "action": "action occurring",
+                "background": "background description", 
+                "interesting": "most interesting element",
+                "mood": "overall mood",
+                "colors": ["color1", "color2"]
+              }`
+            },
+            {
+              inline_data: {
+                mime_type: "image/jpeg",
+                data: base64Image
+              }
+            }
+          ]
+        }]
+      };
+
+      const response = await fetch(GEMINI_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-goog-api-key': GEMINI_API_KEY
+        },
+        body: JSON.stringify(requestBody)
       });
       
-      return JSON.parse(completion.content);
+      if (!response.ok) {
+        throw new Error(`Gemini API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const text = data.candidates[0].content.parts[0].text;
+      
+      // Extract JSON from response text
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      } else {
+        console.error('No JSON found in Gemini response:', text);
+        return null;
+      }
     } catch (error) {
-      console.error('Error in AI analysis:', error);
+      console.error('Error in Gemini AI analysis:', error);
       return null;
     }
   }
@@ -821,167 +830,6 @@ document.addEventListener('DOMContentLoaded', function() {
       const clonedMessage = messageEl.cloneNode(true);
       poppedOutChatMessages.appendChild(clonedMessage);
       poppedOutChatMessages.scrollTop = poppedOutChatMessages.scrollHeight;
-    }
-  }
-
-  // Add new functions for audio analysis
-  function setupAudioAnalysis(mediaElement) {
-    try {
-      // Stop any existing audio analysis
-      stopAudioAnalysis();
-      
-      // Create audio context
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      audioAnalyser = audioContext.createAnalyser();
-      audioAnalyser.fftSize = 2048;
-      
-      // Create buffer for frequency data
-      const bufferLength = audioAnalyser.frequencyBinCount;
-      audioDataArray = new Uint8Array(bufferLength);
-      
-      // Connect audio source
-      if (mediaElement.srcObject) {
-        // For MediaStream (streaming)
-        audioSource = audioContext.createMediaStreamSource(mediaElement.srcObject);
-      } else {
-        // For regular video element
-        audioSource = audioContext.createMediaElementSource(mediaElement);
-        audioSource.connect(audioContext.destination); // Connect to speakers for playback
-      }
-      
-      // Connect source to analyser
-      audioSource.connect(audioAnalyser);
-      
-      // Start periodic analysis
-      audioAnalysisInterval = setInterval(analyzeAudio, 5000); // Check audio every 5 seconds
-      
-      // Do initial analysis after a short delay
-      setTimeout(analyzeAudio, 2000);
-    } catch (error) {
-      console.error('Error setting up audio analysis:', error);
-    }
-  }
-  
-  function stopAudioAnalysis() {
-    if (audioAnalysisInterval) {
-      clearInterval(audioAnalysisInterval);
-      audioAnalysisInterval = null;
-    }
-    
-    if (audioContext) {
-      // Close audio context if it exists and is not already closed
-      if (audioContext.state !== 'closed') {
-        audioContext.close().catch(err => console.error('Error closing audio context:', err));
-      }
-      audioContext = null;
-      audioAnalyser = null;
-      audioSource = null;
-      audioDataArray = null;
-    }
-  }
-  
-  function analyzeAudio() {
-    if (!audioAnalyser || !audioDataArray || !isPlaying) return;
-    
-    const now = Date.now();
-    if (now - lastAudioAnalysisTime < 3000) return; // Prevent too frequent analysis
-    lastAudioAnalysisTime = now;
-    
-    try {
-      // Get audio data
-      audioAnalyser.getByteFrequencyData(audioDataArray);
-      
-      // Calculate audio characteristics
-      const average = audioDataArray.reduce((sum, value) => sum + value, 0) / audioDataArray.length;
-      const peak = Math.max(...audioDataArray);
-      
-      // Determine audio characteristics
-      const isLoud = average > 70; // Arbitrary threshold
-      const isQuiet = average < 20; // Arbitrary threshold
-      const hasPeaks = peak > 200; // Arbitrary threshold
-      
-      // Extract speech if possible
-      extractSpeechFromAudio().then(transcript => {
-        // Generate messages based on audio analysis
-        generateAudioResponseMessages(isLoud, isQuiet, hasPeaks, average, peak, transcript);
-      });
-    } catch (error) {
-      console.error('Error analyzing audio:', error);
-    }
-  }
-  
-  async function extractSpeechFromAudio() {
-    // This is a placeholder for potential speech recognition
-    // In a real implementation, you would use the Web Speech API or similar
-    
-    // For now, we'll return an empty transcript since browser
-    // speech recognition usually requires user interaction
-    return "";
-    
-    /* Example of how this might work with Web Speech API:
-    const recognition = new webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    
-    return new Promise((resolve) => {
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        resolve(transcript);
-      };
-      
-      recognition.onerror = () => {
-        resolve("");
-      };
-      
-      recognition.start();
-      setTimeout(() => {
-        recognition.stop();
-        resolve("");
-      }, 3000);
-    });
-    */
-  }
-  
-  function generateAudioResponseMessages(isLoud, isQuiet, hasPeaks, average, peak, transcript) {
-    const messages = [];
-    
-    // Generate comments based on audio characteristics
-    if (isLoud) {
-      messages.push("Whoa, that got loud all of a sudden!");
-      messages.push("Turn it up! The audio is pumping!");
-      messages.push("My speakers are getting a workout!");
-    }
-    
-    if (isQuiet && Math.random() > 0.7) {
-      messages.push("It's so quiet now...");
-      messages.push("Can barely hear anything right now.");
-      messages.push("Did the audio cut out for anyone else?");
-    }
-    
-    if (hasPeaks) {
-      messages.push("That sound peak was impressive!");
-      messages.push("Did you hear that?");
-      messages.push("Those audio spikes are intense!");
-    }
-    
-    // If we have a transcript (for future implementation)
-    if (transcript && transcript.length > 0) {
-      messages.push(`I think I heard someone say "${transcript}"`);
-      messages.push(`Did anyone else catch that? "${transcript}"`);
-    }
-    
-    // Only send messages sometimes
-    if (messages.length > 0 && Math.random() > 0.5) {
-      // Send 1-2 messages from the audio analysis
-      const numMessages = Math.min(messages.length, Math.floor(Math.random() * 2) + 1);
-      for (let i = 0; i < numMessages; i++) {
-        const index = Math.floor(Math.random() * messages.length);
-        const message = messages.splice(index, 1)[0];
-        
-        setTimeout(() => {
-          sendAnalysisMessage(message);
-        }, i * 2000); // Stagger messages by 2 seconds
-      }
     }
   }
 
